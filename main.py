@@ -2,7 +2,7 @@ import logging
 import argparse
 import math
 
-from parser import FogMap, _tile_x_y_to_lng_lat, MAP_WIDTH, TILE_WIDTH, BLOCK_BITMAP_SIZE
+from parser import FogMap, _tile_x_y_to_lng_lat, MAP_WIDTH, TILE_WIDTH, BITMAP_WIDTH, BLOCK_BITMAP_SIZE
 import gpxpy
 import gpxpy.gpx
 
@@ -11,15 +11,14 @@ try:
 except ModuleNotFoundError:
     tqdm = None
 
-BLOCK_WIDTH = 64
-assert BLOCK_WIDTH**2 == BLOCK_BITMAP_SIZE * 8
-SAMPLE_LEVEL_MAX = int(math.log(BLOCK_WIDTH, 2))
+assert BITMAP_WIDTH**2 == BLOCK_BITMAP_SIZE * 8
+SAMPLE_LEVEL_MAX = int(math.log(BITMAP_WIDTH, 2))
 EARTH_EQUATOR_PERIMETER_METERS = 40_075_000
 
 
 def get_points(map, slot_width):
-    assert slot_width <= BLOCK_WIDTH
-    assert BLOCK_WIDTH % slot_width == 0
+    assert slot_width <= BITMAP_WIDTH
+    assert BITMAP_WIDTH % slot_width == 0
 
     if tqdm:
         progress = tqdm.tqdm(
@@ -29,12 +28,12 @@ def get_points(map, slot_width):
     for _, tile in map.tile_map.items():
         for _, block in tile.blocks.items():
             slots = {}
-            for y in range(BLOCK_WIDTH):
-                for x in range(BLOCK_WIDTH):
+            for y in range(BITMAP_WIDTH):
+                for x in range(BITMAP_WIDTH):
                     slot_key = (x // slot_width, y // slot_width)
                     if slot_key in slots:
                         continue
-                    offset = y * BLOCK_WIDTH + x
+                    offset = y * BITMAP_WIDTH + x
                     if block.bitmap[offset // 8] & (1 << (7 - offset % 8)):
                         slots[slot_key] = (x, y)
             for _, sample in slots.items():
@@ -73,7 +72,7 @@ if __name__ == "__main__":
 
     def get_resolution(sample_level):
         return int(EARTH_EQUATOR_PERIMETER_METERS / MAP_WIDTH / TILE_WIDTH /
-                   BLOCK_WIDTH * get_slot_width(sample_level))
+                   BITMAP_WIDTH * get_slot_width(sample_level))
 
     sample_level_text = "0 means no sampling. " + " ".join([
         f'{i} means resolution of ~{get_resolution(i)}m.'
@@ -102,7 +101,7 @@ if __name__ == "__main__":
 
     logging.info("Gathering waypoints...")
     gpx = gpxpy.gpx.GPX()
-    for lng, lat in get_points(map, args.sample_level):
+    for lng, lat in get_points(map, get_slot_width(args.sample_level)):
         gpx.waypoints.append(gpxpy.gpx.GPXWaypoint(lat, lng))
 
     logging.info("Waypoints gathered. Writting GPX file...")
