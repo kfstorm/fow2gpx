@@ -1,25 +1,48 @@
-import sys
 import logging
 import argparse
+import math
 
-from parser import FogMap, _tile_x_y_to_lng_lat, BLOCK_BITMAP_SIZE
+from parser import FogMap, _tile_x_y_to_lng_lat, MAP_WIDTH, TILE_WIDTH, BLOCK_BITMAP_SIZE
 import gpxpy
 import gpxpy.gpx
 
+try:
+    import tqdm
+except ModuleNotFoundError:
+    tqdm = None
+
 BLOCK_WIDTH = 64
 assert BLOCK_WIDTH**2 == BLOCK_BITMAP_SIZE * 8
+SAMPLE_LEVEL_MAX = int(math.log(BLOCK_WIDTH, 2))
+EARTH_EQUATOR_PERIMETER_METERS = 40_075_000
 
 
-def get_points(map):
+def get_points(map, slot_width):
+    assert slot_width <= BLOCK_WIDTH
+    assert BLOCK_WIDTH % slot_width == 0
+
+    if tqdm:
+        progress = tqdm.tqdm(
+            total=sum([len(tile.blocks) for tile in map.tile_map.values()]))
+    else:
+        progress = None
     for _, tile in map.tile_map.items():
         for _, block in tile.blocks.items():
-            for x in range(BLOCK_WIDTH):
-                for y in range(BLOCK_WIDTH):
+            slots = {}
+            for y in range(BLOCK_WIDTH):
+                for x in range(BLOCK_WIDTH):
+                    slot_key = (x // slot_width, y // slot_width)
+                    if slot_key in slots:
+                        continue
                     offset = y * BLOCK_WIDTH + x
                     if block.bitmap[offset // 8] & (1 << (7 - offset % 8)):
-                        yield _tile_x_y_to_lng_lat(
-                            tile.x + block.x / 128 + x / 128 / 64,
-                            tile.y + block.y / 128 + y / 128 / 64)
+                        slots[slot_key] = (x, y)
+            for _, sample in slots.items():
+                yield _tile_x_y_to_lng_lat(
+                    tile.x + block.x / 128 + sample[0] / 128 / 64,
+                    tile.y + block.y / 128 + sample[1] / 128 / 64)
+            if progress:
+                progress.update(1)
 
 
 if __name__ == "__main__":
@@ -44,6 +67,31 @@ if __name__ == "__main__":
         help="The path of exported GPX file.",
         required=True,
     )
+
+    def get_slot_width(sample_level):
+        return int(math.pow(2, sample_level))
+
+    def get_resolution(sample_level):
+        return int(EARTH_EQUATOR_PERIMETER_METERS / MAP_WIDTH / TILE_WIDTH /
+                   BLOCK_WIDTH * get_slot_width(sample_level))
+
+    sample_level_text = "0 means no sampling. " + " ".join([
+        f'{i} means resolution of ~{get_resolution(i)}m.'
+        for i in range(1, SAMPLE_LEVEL_MAX + 1)
+    ])
+
+    parser.add_argument(
+        '--sample-level',
+        '-s',
+        type=int,
+        default=0,
+        metavar=f"[0-{SAMPLE_LEVEL_MAX}]",
+        choices=range(0, SAMPLE_LEVEL_MAX + 1),
+        help=
+        "The optional sample level to reduce the amount of waypoints and the size of output file. "
+        f"Must be between 0 - {SAMPLE_LEVEL_MAX}. " + sample_level_text,
+        required=False,
+    )
     parser.epilog = 'Example: python main.py -i "/path/to/Fog of World" -o "/path/to/output.gpx"'
 
     args = parser.parse_args()
@@ -54,8 +102,8 @@ if __name__ == "__main__":
 
     logging.info("Gathering waypoints...")
     gpx = gpxpy.gpx.GPX()
-    for lng, lat in get_points(map):
+    for lng, lat in get_points(map, args.sample_level):
         gpx.waypoints.append(gpxpy.gpx.GPXWaypoint(lat, lng))
 
-    logging.info("Waypoints gathered. Writting output file...")
+    logging.info("Waypoints gathered. Writting GPX file...")
     args.output_file.write(gpx.to_xml())
