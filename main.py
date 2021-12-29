@@ -1,5 +1,6 @@
 import sys
 import logging
+import argparse
 
 from parser import FogMap, _tile_x_y_to_lng_lat, BLOCK_BITMAP_SIZE
 import gpxpy
@@ -26,16 +27,35 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-    assert len(sys.argv) > 2
+    parser = argparse.ArgumentParser(
+        description='Export your Fog of World track data to GPX files.')
+    parser.add_argument(
+        '--fow-path',
+        "-i",
+        type=str,
+        help="The path of Fog of World data folder. "
+        "Note that this folder must contains the 'Sync' folder.",
+        required=True,
+    )
+    parser.add_argument(
+        '--output-file',
+        '-o',
+        type=argparse.FileType('w', encoding='UTF-8'),
+        help="The path of exported GPX file.",
+        required=True,
+    )
+    parser.epilog = 'Example: python main.py -i "/path/to/Fog of World" -o "/path/to/output.gpx"'
 
-    logging.info("Loading Fog of World data.")
-    map = FogMap(sys.argv[1])
+    args = parser.parse_args()
+
+    logging.info("Loading Fog of World data...")
+    map = FogMap(args.fow_path)
     logging.info("Fog of World data loaded.")
 
+    logging.info("Gathering waypoints...")
     gpx = gpxpy.gpx.GPX()
     for lng, lat in get_points(map):
         gpx.waypoints.append(gpxpy.gpx.GPXWaypoint(lat, lng))
 
-    logging.info("Waypoints gathered. Writting output file.")
-    with open(sys.argv[2], "w", encoding="utf8") as f:
-        f.write(gpx.to_xml())
+    logging.info("Waypoints gathered. Writting output file...")
+    args.output_file.write(gpx.to_xml())
